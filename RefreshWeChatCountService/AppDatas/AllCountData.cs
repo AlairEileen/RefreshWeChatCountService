@@ -46,28 +46,32 @@ namespace RefreshWeChatCountService.AppDatas
                 {
                     wcc.Encoding = Encoding.UTF8;
 
-
                     da = wcc.DownloadDataTaskAsync(merchantsUrl + 1).Result;
                     //var json = wcc.DownloadStringTaskAsync(merchantsUrl + 1).Result;
                     json = Encoding.UTF8.GetString(da);
                     list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantModel>>(json);
                     var pageSum = list.data.maxpage;
-                    TaskFactory taskFactory = new TaskFactory();
+                    //TaskFactory taskFactory = new TaskFactory();
                     //var tasks = new Task[pageSum];
-                    var tasks = new List<Task>();
-                    var pageIndexs = new List<int>();
-                    for (int i = 0; i < pageSum; i++)
-                    {
-                        pageIndexs.Add(i + 1);
-                        //tasks.Add(taskFactory.StartNew(() => GetMerchantsTask(i+1)));
-                    }
-                    foreach (var item in pageIndexs)
-                    {
-                        tasks.Add(taskFactory.StartNew(() => GetMerchantsTask(item)));
+                    //var tasks = new List<Task>();
+                    //var pageIndexs = new List<int>();
 
-                    }
-                    taskFactory.ContinueWhenAll(tasks.ToArray(), t => { RefreshMerchantsApps(); taskFactory = null; tasks = null; pageIndexs = null; });
                     MongoDBContext.MerchantModelContext.GetCollection().DeleteMany(MongoDBContext.MerchantModelContext.Filter.Empty);
+
+                    Parallel.For(1, pageSum + 1, pageIndex =>
+                            GetMerchantsTask(pageIndex)
+                    );
+                    //for (int i = 0; i < pageSum; i++)
+                    //{
+                    //    pageIndexs.Add(i + 1);
+                    //    //tasks.Add(taskFactory.StartNew(() => GetMerchantsTask(i+1)));
+                    //}
+                    //foreach (var item in pageIndexs)
+                    //{
+                    //    tasks.Add(taskFactory.StartNew(() => GetMerchantsTask(item)));
+                    //}
+                    //taskFactory.ContinueWhenAll(tasks.ToArray(), t => { RefreshMerchantsApps(); taskFactory = null; tasks = null; pageIndexs = null; });
+
 
                 }
             }
@@ -118,24 +122,25 @@ namespace RefreshWeChatCountService.AppDatas
                     //var json = wcc.DownloadStringTaskAsync(appsUrl + 1).Result;
                     list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantAppModel>>(json);
                     var pageSum = list.data.maxpage;
-                    TaskFactory taskFactory = new TaskFactory();
+                    //TaskFactory taskFactory = new TaskFactory();
                     //Task[] tasks = new Task[pageSum];
-                    var tasks = new List<Task>();
+                    //var tasks = new List<Task>();
 
-                    var pageIndexs = new List<int>();
-                    for (int i = 0; i < pageSum; i++)
-                    {
-                        pageIndexs.Add(i + 1);
-                    }
-                    foreach (var item in pageIndexs)
-                    {
-                        tasks.Add(taskFactory.StartNew(() => GetMiniAppsTask(item)));
-                    }
-                    taskFactory.ContinueWhenAll(tasks.ToArray(), t =>
-                    {
-                        taskFactory = null; tasks = null; pageIndexs = null;
-                    });
+                    //var pageIndexs = new List<int>();
+                    //for (int i = 0; i < pageSum; i++)
+                    //{
+                    //    pageIndexs.Add(i + 1);
+                    //}
+                    //foreach (var item in pageIndexs)
+                    //{
+                    //    tasks.Add(taskFactory.StartNew(() => GetMiniAppsTask(item)));
+                    //}
+                    //taskFactory.ContinueWhenAll(tasks.ToArray(), t =>
+                    //{
+                    //    taskFactory = null; tasks = null; pageIndexs = null;
+                    //});
                     MongoDBContext.MerchantAppModelContext.GetCollection().DeleteMany(MongoDBContext.MerchantAppModelContext.Filter.Empty);
+                    Parallel.For(1, pageSum + 1, pageIndex => GetMiniAppsTask(pageIndex));
                 }
             }
             catch (Exception e) { e.Save(); }
@@ -151,7 +156,7 @@ namespace RefreshWeChatCountService.AppDatas
             {
                 using (WebClient wc = new WebClient())
                 {
-                    da = wc.DownloadDataTaskAsync(appsUrl + index).Result;
+                    da = wc.DownloadData(appsUrl + index);
                     json = Encoding.UTF8.GetString(da);
                     list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantAppModel>>(json);
                     if (list == null || list.code != 0)
@@ -163,7 +168,6 @@ namespace RefreshWeChatCountService.AppDatas
                     json = null;
                     list = null;
                 }
-
             }
             catch (Exception e)
             {
@@ -192,7 +196,7 @@ namespace RefreshWeChatCountService.AppDatas
             {
 
                 var timeOut = 0;
-                response = wc.DownloadStringTaskAsync($"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={appID}&secret={appSecret}").Result;
+                response = wc.DownloadString($"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={appID}&secret={appSecret}");
 
                 jObj = JsonConvert.DeserializeObject<JObject>(response);
 

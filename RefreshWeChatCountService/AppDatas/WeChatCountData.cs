@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 
 namespace RefreshWeChatCountService.AppDatas
 {
-    public class WeChatCountData:IDisposable
+    public class WeChatCountData : IDisposable
     {
         private MongoDBContext mongoDBContext;
 
@@ -24,71 +24,73 @@ namespace RefreshWeChatCountService.AppDatas
                 if (mongoDBContext == null) mongoDBContext = new MongoDBContext(); return mongoDBContext;
             }
         }
-        public AllCountData AllCountData
-        {
-            get
-            {
-                if (allCountData == null) allCountData = new AllCountData(); return allCountData;
-            }
-        }
 
-        private AllCountData allCountData;
-
-
-
-        internal void RefreshWeChatCountData( )
+        internal void RefreshWeChatCountData()
         {
             RefreshWeChatCountDataAsync();
         }
 
 
 
-        internal void RefreshCountSumData( )
+        internal void RefreshCountSumData()
         {
             CreateRefreshCountSumDataTasks();
         }
 
 
-        private void RefreshWeChatCountDataAsync( )
+        private void RefreshWeChatCountDataAsync()
         {
-
             IMongoCollection<MerchantAppModel> mamCollection = null;
             IMongoCollection<WeChatCountModel> wccmCollection = null;
             List<MerchantAppModel> mamList;
-            TaskFactory taskFactory = null;
-            List<Task> tasks = null;
+            //TaskFactory taskFactory = null;
+            //List<Task> tasks = null;
             try
             {
                 mamCollection = MongoDBContext.MerchantAppModelContext.GetCollection();
                 wccmCollection = MongoDBContext.WeChatCountModelContext.GetCollection();
                 mamList = mamCollection.Find(MongoDBContext.MerchantAppModelContext.Filter.Empty).ToList();
-                taskFactory = new TaskFactory();
-                tasks = new List<Task>();
-                foreach (var item in mamList)
+
+                Parallel.ForEach(mamList, item =>
                 {
                     if (!item.AppID.CheckEmpty(item.AppSecret))
                     {
-                        tasks.Add(taskFactory.StartNew(() => GetWeChatDataAsync(mamCollection, item, wccmCollection)));
+                        GetWeChatDataAsync(mamCollection, item, wccmCollection);
                     }
-                }
-                taskFactory.ContinueWhenAll(tasks.ToArray(), x =>
-                {
-                    RefreshCountSumData();
-                    mamList = null;
-                    taskFactory = null;
-                    tasks = null;
-                    mamCollection = null;
-                    wccmCollection = null;
                 });
+                RefreshCountSumData();
+
+                //taskFactory = new TaskFactory();
+                //tasks = new List<Task>();
+                //foreach (var item in mamList)
+                //{
+                //    if (!item.AppID.CheckEmpty(item.AppSecret))
+                //    {
+                //        tasks.Add(taskFactory.StartNew(() => GetWeChatDataAsync(mamCollection, item, wccmCollection)));
+                //    }
+                //}
+                //taskFactory.ContinueWhenAll(tasks.ToArray(), x =>
+                //{
+                //    RefreshCountSumData();
+                //    mamList = null;
+                //    taskFactory = null;
+                //    tasks = null;
+                //    mamCollection = null;
+                //    wccmCollection = null;
+                //});
+
+
+
             }
             catch (Exception e)
             {
                 e.Save();
-                taskFactory = null;
-                tasks = null;
+                //taskFactory = null;
+                //tasks = null;
                 mamList = null;
-                mamCollection = null;
-                wccmCollection = null;
+                //mamCollection = null;
+                //wccmCollection = null;
+
             }
 
         }
@@ -101,7 +103,10 @@ namespace RefreshWeChatCountService.AppDatas
                 using (WebClient wc = new WebClient())
                 {
                     wc.Encoding = Encoding.UTF8;
-                    token = AllCountData.GetWeChatAccessToken(wc, mam.AppID, mam.AppSecret);
+                    using (var allCountData = new AllCountData())
+                    {
+                        token = allCountData.GetWeChatAccessToken(wc, mam.AppID, mam.AppSecret);
+                    }
                     if (string.IsNullOrEmpty(token))
                     {
                         return;
@@ -131,6 +136,7 @@ namespace RefreshWeChatCountService.AppDatas
                         if (!string.IsNullOrEmpty(jsonData))
                         {
                             SaveCountData(wccmCollection, jsonData, mam, item);
+                            jsonData = null;
                         }
                     }
                 }
@@ -139,8 +145,10 @@ namespace RefreshWeChatCountService.AppDatas
             {
                 e.Save();
             }
-           
-
+            token = null;
+            data = null;
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
         }
         private void SaveCountData(IMongoCollection<WeChatCountModel> wccmCollection, string jsonData, MerchantAppModel mam, KeyValuePair<WeChatCountType, string> item)
         {
@@ -200,12 +208,15 @@ namespace RefreshWeChatCountService.AppDatas
         {
 
             var wccmCollection = MongoDBContext.WeChatCountModelContext.GetCollection();
-            var mmCollection = MongoDBContext.MerchantModelContext.GetCollection(); var cmCollection = MongoDBContext.WeChatCountAppModelContext.GetCollection();
+            var mmCollection = MongoDBContext.MerchantModelContext.GetCollection();
+            var cmCollection = MongoDBContext.WeChatCountAppModelContext.GetCollection();
             var cmList = cmCollection.Find(Builders<WeChatCountAppModel>.Filter.Empty).ToList();
             if (cmList != null && cmList.Count > 30)
                 cmCollection.DeleteMany(Builders<WeChatCountAppModel>.Filter.Lte(x => x.LastChangeTime, cmList[29].LastChangeTime));
             var list = (wccmCollection.Find(Builders<WeChatCountModel>.Filter.Empty)).ToList();
             var countModel = new WeChatCountAppModel();
+
+
             foreach (var wccm in list)
             {
                 try
@@ -226,17 +237,27 @@ namespace RefreshWeChatCountService.AppDatas
                     var wccmData = wccm.CountDataList.Find(x => x.DataType == WeChatCountType.昨天的概况);
                     if (wccmData != null)
                     {
-                        var dataModel = JsonConvert.DeserializeObject<WeChatCountBaseJsonModel>(wccmData.CountData);
-                        app.AccountSum = dataModel.list[0].visit_total;
-                        app.ShareAccountSum = dataModel.list[0].share_uv;
-                        app.ShareSum = dataModel.list[0].share_pv;
-                        merchantCount.ShareSum += app.ShareSum;
-                        merchantCount.ShareAccountSum += app.ShareAccountSum;
-                        merchantCount.AccountSum += app.AccountSum;
-                        countModel.AccountSum += app.AccountSum;
-                        countModel.ShareAccountSum += app.ShareAccountSum;
-                        countModel.ShareSum += app.ShareSum;
+                        using (var dataModel = JsonConvert.DeserializeObject<WeChatCountBaseJsonModel>(wccmData.CountData))
+                        {
+                            app.AccountSum = dataModel.list[0].visit_total;
+                            app.ShareAccountSum = dataModel.list[0].share_uv;
+                            app.ShareSum = dataModel.list[0].share_pv;
+
+                            merchantCount.ShareSum += app.ShareSum;
+                            merchantCount.ShareAccountSum += app.ShareAccountSum;
+                            merchantCount.AccountSum += app.AccountSum;
+
+                            countModel.AccountSum += app.AccountSum;
+                            countModel.ShareAccountSum += app.ShareAccountSum;
+                            countModel.ShareSum += app.ShareSum;
+                        }
+                        //var dataModel = JsonConvert.DeserializeObject<WeChatCountBaseJsonModel>(wccmData.CountData);
                     }
+                    merchant = null;
+                    merchantCount = null;
+                    app = null;
+                    wccmData = null;
+                
                 }
                 catch (Exception)
                 {
@@ -244,6 +265,12 @@ namespace RefreshWeChatCountService.AppDatas
                 }
             }
             cmCollection.InsertOne(countModel);
+            wccmCollection = null;
+            mmCollection = null;
+            cmCollection = null;
+            countModel = null;
+            list = null;
+            cmList = null;
         }
         private MerchantCountAppModel GetMerchantCount(WeChatCountModel wccm, MerchantModel merchant, WeChatCountAppModel countModel)
         {
@@ -318,10 +345,10 @@ namespace RefreshWeChatCountService.AppDatas
                     end_date = endDate
                 };
                 var json = "";
-                var da = wc.UploadDataTaskAsync(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
+                var da = wc.UploadData(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
                 //var response = wc.UploadStringTaskAsync(url + accessToken, JsonConvert.SerializeObject(reObj));
 
-                json = Encoding.UTF8.GetString(da.Result);
+                json = Encoding.UTF8.GetString(da);
                 return json;
             }
             catch (Exception)
@@ -375,23 +402,36 @@ namespace RefreshWeChatCountService.AppDatas
         #endregion
         public void Dispose()
         {
+            MongoDBContext.Dispose();
             mongoDBContext = null;
-            allCountData = null;
             GC.SuppressFinalize(this);
         }
     }
 
-    public class WeChatCountBaseJsonModel
+    public class WeChatCountBaseJsonModel : IDisposable
     {
         public List<WeChatCountBaseJsonItemModel> list
         { get; set; }
+
+        public void Dispose()
+        {
+            list.ForEach(x => x.Dispose());
+            list = null;
+            GC.SuppressFinalize(this);
+        }
     }
 
-    public class WeChatCountBaseJsonItemModel
+    public class WeChatCountBaseJsonItemModel : IDisposable
     {
         public string ref_date { get; set; }
         public int visit_total { get; set; }
         public int share_pv { get; set; }
         public int share_uv { get; set; }
+
+        public void Dispose()
+        {
+            ref_date = null;
+            GC.SuppressFinalize(this);
+        }
     }
 }

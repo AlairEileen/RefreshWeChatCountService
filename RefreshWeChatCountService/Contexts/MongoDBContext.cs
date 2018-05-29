@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace RefreshWeChatCountService.Contexts
 {
-    public class MongoDBContext
+    public class MongoDBContext : IDisposable
     {
         private MongoDBModel<MerchantModel> merchantModelContext;
         public MongoDBModel<MerchantModel> MerchantModelContext
@@ -47,7 +47,21 @@ namespace RefreshWeChatCountService.Contexts
                 if (weChatCountAppModelContext == null) weChatCountAppModelContext = new MongoDBModel<WeChatCountAppModel>(); return weChatCountAppModelContext;
             }
         }
-        
 
+        public void Dispose()
+        {
+            MerchantModelContext.Dispose();
+            merchantModelContext = null;
+
+            MerchantAppModelContext.Dispose();
+            merchantAppModelContext = null;
+
+            WeChatCountModelContext.Dispose();
+            weChatCountModelContext = null;
+
+            WeChatCountAppModelContext.Dispose();
+            weChatCountAppModelContext = null;
+            GC.SuppressFinalize(this);
+        }
     }
 }

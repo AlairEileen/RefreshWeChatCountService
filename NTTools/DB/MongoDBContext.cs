@@ -8,10 +8,10 @@ using System.Threading.Tasks;
 namespace NTTools.DB
 {
 
-   
 
 
-    public class MongoDBModel<T>
+
+    public class MongoDBModel<T> : IDisposable
     {
         protected MongoDBTool mdbTool;
         public MongoDBTool MdbTool
@@ -30,6 +30,13 @@ namespace NTTools.DB
         {
             return MdbTool.GetMongoCollection<T>();
         }
+
+        public void Dispose()
+        {
+            mdbTool = null;
+            GC.SuppressFinalize(this);
+        }
+
         public FilterDefinitionBuilder<T> Filter { get => Builders<T>.Filter; }
         public UpdateDefinitionBuilder<T> Update { get => Builders<T>.Update; }
     }
