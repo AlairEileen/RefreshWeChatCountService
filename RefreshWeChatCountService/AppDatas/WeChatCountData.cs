@@ -27,6 +27,7 @@ namespace RefreshWeChatCountService.AppDatas
 
         internal void RefreshWeChatCountData()
         {
+            ServicePointManager.DefaultConnectionLimit = 1024;
             RefreshWeChatCountDataAsync();
         }
 
@@ -100,46 +101,48 @@ namespace RefreshWeChatCountService.AppDatas
             Dictionary<WeChatCountType, string> data = null;
             try
             {
-                using (WebClient wc = new WebClient())
+                //using (WebClient wc = new WebClient())
+                //{
+                //wc.Encoding = Encoding.UTF8;
+                WebClient wc = null;
+                using (var allCountData = new AllCountData())
                 {
-                    wc.Encoding = Encoding.UTF8;
-                    using (var allCountData = new AllCountData())
+                    token = allCountData.GetToken(mam.AppID, mam.AppSecret);
+                    //token = allCountData.GetWeChatAccessToken(wc, mam.AppID, mam.AppSecret);
+                }
+                if (string.IsNullOrEmpty(token))
+                {
+                    return;
+                }
+                data = GetWeChatRequestData();
+                foreach (var item in data)
+                {
+                    string jsonData = "";
+                    int num = (int)item.Key;
+                    if (num == 5 || num == 51 || num == 50)
                     {
-                        token = allCountData.GetWeChatAccessToken(wc, mam.AppID, mam.AppSecret);
+                        jsonData = GetWeChatCountPortrait(wc, item.Value, token, num);
                     }
-                    if (string.IsNullOrEmpty(token))
+                    else if (num < 10)
                     {
-                        return;
-                    }
-                    data = GetWeChatRequestData();
-                    foreach (var item in data)
-                    {
-                        string jsonData = "";
-                        int num = (int)item.Key;
-                        if (num == 5 || num == 51 || num == 50)
-                        {
-                            jsonData = GetWeChatCountPortrait(wc, item.Value, token, num);
-                        }
-                        else if (num < 10)
-                        {
-                            jsonData = GetWeChatCountYesterDay(wc, item.Value, token);
+                        jsonData = GetWeChatCountYesterDay(wc, item.Value, token);
 
-                        }
-                        else if (num % 10 != 0)
-                        {
-                            jsonData = GetWeChatCountLastWeak(wc, item.Value, token, num % 10);
-                        }
-                        else
-                        {
-                            jsonData = GetWeChatCountLastMonth(wc, item.Value, token);
-                        }
-                        if (!string.IsNullOrEmpty(jsonData))
-                        {
-                            SaveCountData(wccmCollection, jsonData, mam, item);
-                            jsonData = null;
-                        }
+                    }
+                    else if (num % 10 != 0)
+                    {
+                        jsonData = GetWeChatCountLastWeak(wc, item.Value, token, num % 10);
+                    }
+                    else
+                    {
+                        jsonData = GetWeChatCountLastMonth(wc, item.Value, token);
+                    }
+                    if (!string.IsNullOrEmpty(jsonData))
+                    {
+                        SaveCountData(wccmCollection, jsonData, mam, item);
+                        jsonData = null;
                     }
                 }
+                //}
             }
             catch (Exception e)
             {
@@ -150,6 +153,34 @@ namespace RefreshWeChatCountService.AppDatas
             GC.Collect();
             GC.WaitForPendingFinalizers();
         }
+
+        private string GetResponseString(string url, byte[] byteArray)
+        {
+            string res = null;
+            try
+            {
+                HttpWebRequest webRequest = (HttpWebRequest)WebRequest.Create(new Uri(url));
+                webRequest.Method = "post";
+                webRequest.Accept = "application/json";
+                webRequest.ContentType = "application/json";
+                webRequest.ContentLength = byteArray.Length;
+                using (System.IO.Stream newStream = webRequest.GetRequestStream())
+                {
+                    newStream.Write(byteArray, 0, byteArray.Length);
+                    newStream.Close();
+                }
+                using (HttpWebResponse response = (HttpWebResponse)webRequest.GetResponse())
+                {
+                    res = new System.IO.StreamReader(response.GetResponseStream(), Encoding.UTF8).ReadToEnd();
+                }
+                return res;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         private void SaveCountData(IMongoCollection<WeChatCountModel> wccmCollection, string jsonData, MerchantAppModel mam, KeyValuePair<WeChatCountType, string> item)
         {
             try
@@ -257,7 +288,7 @@ namespace RefreshWeChatCountService.AppDatas
                     merchantCount = null;
                     app = null;
                     wccmData = null;
-                
+
                 }
                 catch (Exception)
                 {
@@ -335,26 +366,50 @@ namespace RefreshWeChatCountService.AppDatas
             return GetData(wc, accessToken, url, date, date);
 
         }
+        //private string GetData(WebClient wc, string accessToken, string url, string startDate, string endDate)
+        //{
+        //    try
+        //    {
+        //        var reObj = new
+        //        {
+        //            begin_date = startDate,
+        //            end_date = endDate
+        //        };
+        //        var json = "";
+        //        var da = wc.UploadData(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
+        //        //var response = wc.UploadStringTaskAsync(url + accessToken, JsonConvert.SerializeObject(reObj));
+
+        //        json = Encoding.UTF8.GetString(da);
+        //        return json;
+        //    }
+        //    catch (Exception)
+        //    {
+        //        return null;
+        //    }
+
+        //}
         private string GetData(WebClient wc, string accessToken, string url, string startDate, string endDate)
         {
-            try
+            var reObj = new
             {
-                var reObj = new
-                {
-                    begin_date = startDate,
-                    end_date = endDate
-                };
-                var json = "";
-                var da = wc.UploadData(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
-                //var response = wc.UploadStringTaskAsync(url + accessToken, JsonConvert.SerializeObject(reObj));
+                begin_date = startDate,
+                end_date = endDate
+            };
+            return GetResponseString(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
+            //try
+            //{
 
-                json = Encoding.UTF8.GetString(da);
-                return json;
-            }
-            catch (Exception)
-            {
-                return null;
-            }
+            //    var json = "";
+            //    var da = wc.UploadData(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
+            //    //var response = wc.UploadStringTaskAsync(url + accessToken, JsonConvert.SerializeObject(reObj));
+
+            //    json = Encoding.UTF8.GetString(da);
+            //    return json;
+            //}
+            //catch (Exception)
+            //{
+            //    return null;
+            //}
 
         }
         /// <summary>

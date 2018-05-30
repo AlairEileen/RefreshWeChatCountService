@@ -224,6 +224,57 @@ namespace RefreshWeChatCountService.AppDatas
 
         }
 
+        internal string GetToken(string appID, string appSecret)
+        {
+            string url = $"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={appID}&secret={appSecret}";
+            JObject jObj = null;
+            string access_token = null, res = null;
+            JToken at = null, ei = null;
+            try
+            {
+                //string postData = "token=" + steptoken + "&id=" + steporderid + "&driverId=" + stepdriverid;
+                //byte[] byteArray = Encoding.UTF8.GetBytes(postData);
+                HttpWebRequest webRequest = (HttpWebRequest)WebRequest.Create(new Uri(url));
+                webRequest.Method = "get";
+                webRequest.ContentType = "application/x-www-form-urlencoded";
+                //webRequest.ContentLength = byteArray.Length;
+                //System.IO.Stream newStream = webRequest.GetRequestStream();
+                //newStream.Write(byteArray, 0, byteArray.Length);
+                //newStream.Close();
+                using (HttpWebResponse response = (HttpWebResponse)webRequest.GetResponse())
+                {
+                    res = new System.IO.StreamReader(response.GetResponseStream(), Encoding.UTF8).ReadToEnd();
+                }
+                jObj = JsonConvert.DeserializeObject<JObject>(res);
+
+
+                if (jObj.TryGetValue("access_token", out at))
+                {
+                    access_token = at.ToString();
+                }
+                else
+                {
+                    access_token = null;
+                }
+                var timeOut = 0;
+
+                if (jObj.TryGetValue("expires_in", out ei))
+                {
+                    timeOut = Convert.ToInt32(ei.ToString());
+                }
+                else
+                {
+                    timeOut = 0;
+                }
+                return access_token;
+            }
+            catch (Exception e)
+            {
+                e.Save();
+                return null;
+            }
+        }
+
         public void Dispose()
         {
             mongoDBContext = null;
