@@ -31,117 +31,106 @@ namespace RefreshWeChatCountService.AppDatas
 
         internal void RefreshMerchants()
         {
+            ServicePointManager.DefaultConnectionLimit =100;
             CreateRefreshMerchantsTasks();
         }
 
         private void CreateRefreshMerchantsTasks()
         {
-
-            byte[] da = null;
+            var cfg = TimerConfigModelContext.GetConfig();
+            if (cfg.MerchantRefreshDate == null)
+                cfg.MerchantRefreshDate = new RefreshDate();
+            cfg.MerchantRefreshDate.LastRefreshStartTime = DateTime.Now;
+            TimerConfigModelContext.SaveConfigLog(cfg);
             string json = null;
             AllCountRequestJsonModel<MerchantModel> list = null;
             try
             {
-                using (WebClient wcc = new WebClient())
-                {
-                    wcc.Encoding = Encoding.UTF8;
+                MongoDBContext.MerchantModelContext.GetCollection().DeleteMany(MongoDBContext.MerchantModelContext.Filter.Empty);
+                json = WRGetJson(merchantsUrl + 1);
+                list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantModel>>(json);
+                SaveMerchantData(list);
+                var pageSum = list.data.maxpage;
 
-                    da = wcc.DownloadDataTaskAsync(merchantsUrl + 1).Result;
-                    //var json = wcc.DownloadStringTaskAsync(merchantsUrl + 1).Result;
-                    json = Encoding.UTF8.GetString(da);
-                    list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantModel>>(json);
-                    var pageSum = list.data.maxpage;
-                    //TaskFactory taskFactory = new TaskFactory();
-                    //var tasks = new Task[pageSum];
-                    //var tasks = new List<Task>();
-                    //var pageIndexs = new List<int>();
+                Parallel.For(2, pageSum + 1, pageIndex =>
+                        GetMerchantsTask(pageIndex)
+                );
+                cfg.MerchantRefreshDate.LastRefreshEndTime = DateTime.Now;
+                cfg.MerchantRefreshDate.RefreshUseSeconds = (long)(cfg.MerchantRefreshDate.LastRefreshEndTime - cfg.MerchantRefreshDate.LastRefreshStartTime).TotalSeconds;
+                TimerConfigModelContext.SaveConfigLog(cfg);
+                RefreshMerchantsApps();
 
-                    MongoDBContext.MerchantModelContext.GetCollection().DeleteMany(MongoDBContext.MerchantModelContext.Filter.Empty);
-
-                    Parallel.For(1, pageSum + 1, pageIndex =>
-                            GetMerchantsTask(pageIndex)
-                    );
-                    //for (int i = 0; i < pageSum; i++)
-                    //{
-                    //    pageIndexs.Add(i + 1);
-                    //    //tasks.Add(taskFactory.StartNew(() => GetMerchantsTask(i+1)));
-                    //}
-                    //foreach (var item in pageIndexs)
-                    //{
-                    //    tasks.Add(taskFactory.StartNew(() => GetMerchantsTask(item)));
-                    //}
-                    //taskFactory.ContinueWhenAll(tasks.ToArray(), t => { RefreshMerchantsApps(); taskFactory = null; tasks = null; pageIndexs = null; });
-
-
-                }
             }
             catch (Exception e) { e.Save(); }
-
-
         }
 
 
 
         private void GetMerchantsTask(int index)
         {
-            byte[] da = null;
             string json = null;
-            AllCountRequestJsonModel<MerchantModel> list = null;
             try
             {
-                using (WebClient wc = new WebClient())
-                {
-
-                    da = wc.DownloadData(merchantsUrl + index);
-                    json = Encoding.UTF8.GetString(da);
-                    list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantModel>>(json);
-                    if (list == null || list.code != 0)
-                    {
-                        return;
-                    }
-                    MongoDBContext.MerchantModelContext.GetCollection().InsertMany(list.data.list);
-                }
-
+                json = WRGetJson(merchantsUrl + index);
+                AllCountRequestJsonModel<MerchantModel> list = null;
+                list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantModel>>(json);
+                SaveMerchantData(list);
             }
             catch (Exception e) { e.Save(); }
 
         }
+
+        private void SaveMerchantData(AllCountRequestJsonModel<MerchantModel> list)
+        {
+            if (list == null || list.code != 0)
+            {
+                return;
+            }
+            MongoDBContext.MerchantModelContext.GetCollection().InsertMany(list.data.list);
+        }
+        private string WRGetJson(string url)
+        {
+            try
+            {
+                GC.Collect();
+                string json = null;
+                HttpWebRequest webRequest = (HttpWebRequest)WebRequest.Create(new Uri(url));
+                webRequest.Method = "get";
+                webRequest.ContentType = "application/x-www-form-urlencoded";
+                using (HttpWebResponse response = (HttpWebResponse)webRequest.GetResponse())
+                {
+                    json = new System.IO.StreamReader(response.GetResponseStream(), Encoding.UTF8).ReadToEnd();
+                }
+                return json;
+            }
+            catch (Exception e)
+            {
+                e.Save();
+                return null;
+            }
+        }
         private void RefreshMerchantsApps()
         {
-
-            byte[] da = null;
+            var cfg = TimerConfigModelContext.GetConfig();
+            if (cfg.MiniAppRefreshDate == null)
+                cfg.MiniAppRefreshDate = new RefreshDate();
+            cfg.MiniAppRefreshDate.LastRefreshStartTime = DateTime.Now;
+            TimerConfigModelContext.SaveConfigLog(cfg);
             string json = null;
             AllCountRequestJsonModel<MerchantAppModel> list = null;
             try
             {
-                using (WebClient wcc = new WebClient())
-                {
-                    da = wcc.DownloadData(appsUrl + 1);
-                    //var json = wcc.DownloadStringTaskAsync(merchantsUrl + 1).Result;
-                    json = Encoding.UTF8.GetString(da);
-                    //var json = wcc.DownloadStringTaskAsync(appsUrl + 1).Result;
-                    list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantAppModel>>(json);
-                    var pageSum = list.data.maxpage;
-                    //TaskFactory taskFactory = new TaskFactory();
-                    //Task[] tasks = new Task[pageSum];
-                    //var tasks = new List<Task>();
-
-                    //var pageIndexs = new List<int>();
-                    //for (int i = 0; i < pageSum; i++)
-                    //{
-                    //    pageIndexs.Add(i + 1);
-                    //}
-                    //foreach (var item in pageIndexs)
-                    //{
-                    //    tasks.Add(taskFactory.StartNew(() => GetMiniAppsTask(item)));
-                    //}
-                    //taskFactory.ContinueWhenAll(tasks.ToArray(), t =>
-                    //{
-                    //    taskFactory = null; tasks = null; pageIndexs = null;
-                    //});
-                    MongoDBContext.MerchantAppModelContext.GetCollection().DeleteMany(MongoDBContext.MerchantAppModelContext.Filter.Empty);
-                    Parallel.For(1, pageSum + 1, pageIndex => GetMiniAppsTask(pageIndex));
-                }
+                MongoDBContext.MerchantAppModelContext.GetCollection().DeleteMany(MongoDBContext.MerchantAppModelContext.Filter.Empty);
+                json = WRGetJson(appsUrl + 1);
+                list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantAppModel>>(json);
+                SaveMiniAppsData(list);
+                var pageSum = list.data.maxpage;
+                json = null;
+                list = null;
+                Parallel.For(2, pageSum + 1, pageIndex => GetMiniAppsTask(pageIndex));
+                cfg.MiniAppRefreshDate.LastRefreshEndTime = DateTime.Now;
+                cfg.MiniAppRefreshDate.RefreshUseSeconds = (long)(cfg.MiniAppRefreshDate.LastRefreshEndTime - cfg.MiniAppRefreshDate.LastRefreshStartTime).TotalSeconds;
+                TimerConfigModelContext.SaveConfigLog(cfg);
             }
             catch (Exception e) { e.Save(); }
 
@@ -149,34 +138,34 @@ namespace RefreshWeChatCountService.AppDatas
         }
         private void GetMiniAppsTask(int index)
         {
-            byte[] da = null;
             string json = null;
             AllCountRequestJsonModel<MerchantAppModel> list = null;
             try
             {
-                using (WebClient wc = new WebClient())
-                {
-                    da = wc.DownloadData(appsUrl + index);
-                    json = Encoding.UTF8.GetString(da);
-                    list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantAppModel>>(json);
-                    if (list == null || list.code != 0)
-                    {
-                        return;
-                    }
-                    MongoDBContext.MerchantAppModelContext.GetCollection().InsertMany(list.data.list);
-                    da = null;
-                    json = null;
-                    list = null;
-                }
+                json = WRGetJson(appsUrl + index);
+                list = JsonConvert.DeserializeObject<AllCountRequestJsonModel<MerchantAppModel>>(json);
+                SaveMiniAppsData(list);
+                json = null;
+                list = null;
             }
             catch (Exception e)
             {
                 e.Save();
-                da = null;
                 json = null;
                 list = null;
             }
 
+        }
+
+        private void SaveMiniAppsData(AllCountRequestJsonModel<MerchantAppModel> list)
+        {
+            if (list == null || list.code != 0)
+            {
+                return;
+            }
+            var dataList =
+            list.data.list.FindAll(x=>x.AppID.Length==18&&x.AppSecret.Length==32);
+            MongoDBContext.MerchantAppModelContext.GetCollection().InsertMany(dataList);
         }
 
 
@@ -230,49 +219,27 @@ namespace RefreshWeChatCountService.AppDatas
             JObject jObj = null;
             string access_token = null, res = null;
             JToken at = null, ei = null;
-            try
+            res = WRGetJson(url);
+            jObj = JsonConvert.DeserializeObject<JObject>(res);
+            if (jObj.TryGetValue("access_token", out at))
             {
-                //string postData = "token=" + steptoken + "&id=" + steporderid + "&driverId=" + stepdriverid;
-                //byte[] byteArray = Encoding.UTF8.GetBytes(postData);
-                HttpWebRequest webRequest = (HttpWebRequest)WebRequest.Create(new Uri(url));
-                webRequest.Method = "get";
-                webRequest.ContentType = "application/x-www-form-urlencoded";
-                //webRequest.ContentLength = byteArray.Length;
-                //System.IO.Stream newStream = webRequest.GetRequestStream();
-                //newStream.Write(byteArray, 0, byteArray.Length);
-                //newStream.Close();
-                using (HttpWebResponse response = (HttpWebResponse)webRequest.GetResponse())
-                {
-                    res = new System.IO.StreamReader(response.GetResponseStream(), Encoding.UTF8).ReadToEnd();
-                }
-                jObj = JsonConvert.DeserializeObject<JObject>(res);
-
-
-                if (jObj.TryGetValue("access_token", out at))
-                {
-                    access_token = at.ToString();
-                }
-                else
-                {
-                    access_token = null;
-                }
-                var timeOut = 0;
-
-                if (jObj.TryGetValue("expires_in", out ei))
-                {
-                    timeOut = Convert.ToInt32(ei.ToString());
-                }
-                else
-                {
-                    timeOut = 0;
-                }
-                return access_token;
+                access_token = at.ToString();
             }
-            catch (Exception e)
+            else
             {
-                e.Save();
-                return null;
+                access_token = null;
             }
+            var timeOut = 0;
+
+            if (jObj.TryGetValue("expires_in", out ei))
+            {
+                timeOut = Convert.ToInt32(ei.ToString());
+            }
+            else
+            {
+                timeOut = 0;
+            }
+            return access_token;
         }
 
         public void Dispose()

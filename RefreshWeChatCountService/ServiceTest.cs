@@ -43,13 +43,13 @@ namespace RefreshWeChatCountService
                     }
                 }
 
-                if (DateTime.Now.Hour == cfg.RefreshAllCountStartHour && DateTime.Now.Minute == cfg.RefreshAllCountStartMinutes)
-                {
-                    using (var countData = new WeChatCountData())
-                    {
-                        countData.RefreshCountSumData();
-                    }
-                }
+                //if (DateTime.Now.Hour == cfg.RefreshAllCountStartHour && DateTime.Now.Minute == cfg.RefreshAllCountStartMinutes)
+                //{
+                //    using (var countData = new WeChatCountData())
+                //    {
+                //        countData.RefreshCountSumData(cfg);
+                //    }
+                //}
                 //cfg = null;
                 //GC.Collect();
             }, null, 0, period);

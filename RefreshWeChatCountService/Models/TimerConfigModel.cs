@@ -23,8 +23,22 @@ namespace RefreshWeChatCountService.Models
 
         public int RefreshWeChatCountStartHour { get; set; } = 8;
         public int RefreshWeChatCountStartMinutes { get; set; } = 13;
+        
+        public RefreshDate MerchantRefreshDate { get; set; }
+        public RefreshDate MiniAppRefreshDate { get; set; }
+        public RefreshDate WeChatCountRefreshDate { get; set; }
 
-        public int RefreshAllCountStartHour { get; set; } = 8;
-        public int RefreshAllCountStartMinutes { get; set; } = 45;
+
+    }
+
+    public class RefreshDate
+    {
+        [JsonConverter(typeof(DateConverterEndMinute))]
+        [BsonDateTimeOptions(Kind = DateTimeKind.Local)]
+        public DateTime LastRefreshEndTime { get; set; }
+        [JsonConverter(typeof(DateConverterEndMinute))]
+        [BsonDateTimeOptions(Kind = DateTimeKind.Local)]
+        public DateTime LastRefreshStartTime { get; set; }
+        public long RefreshUseSeconds { get; set; }
     }
 }

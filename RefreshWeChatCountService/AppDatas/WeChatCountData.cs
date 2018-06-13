@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace RefreshWeChatCountService.AppDatas
@@ -27,17 +28,15 @@ namespace RefreshWeChatCountService.AppDatas
 
         internal void RefreshWeChatCountData()
         {
-            ServicePointManager.DefaultConnectionLimit = 1024;
+            ServicePointManager.DefaultConnectionLimit = 100;
             RefreshWeChatCountDataAsync();
         }
 
-
-
-        internal void RefreshCountSumData()
+        private void RefreshCountSumData(TimerConfigModel cfg)
         {
-            CreateRefreshCountSumDataTasks();
-        }
 
+            CreateRefreshCountSumDataTasks(cfg);
+        }
 
         private void RefreshWeChatCountDataAsync()
         {
@@ -48,6 +47,12 @@ namespace RefreshWeChatCountService.AppDatas
             //List<Task> tasks = null;
             try
             {
+                var cfg = TimerConfigModelContext.GetConfig();
+                if (cfg.WeChatCountRefreshDate == null)
+                    cfg.WeChatCountRefreshDate = new RefreshDate();
+                cfg.WeChatCountRefreshDate.LastRefreshStartTime = DateTime.Now;
+                TimerConfigModelContext.SaveConfigLog(cfg);
+
                 mamCollection = MongoDBContext.MerchantAppModelContext.GetCollection();
                 wccmCollection = MongoDBContext.WeChatCountModelContext.GetCollection();
                 mamList = mamCollection.Find(MongoDBContext.MerchantAppModelContext.Filter.Empty).ToList();
@@ -59,7 +64,8 @@ namespace RefreshWeChatCountService.AppDatas
                         GetWeChatDataAsync(mamCollection, item, wccmCollection);
                     }
                 });
-                RefreshCountSumData();
+
+                RefreshCountSumData(cfg);
 
                 //taskFactory = new TaskFactory();
                 //tasks = new List<Task>();
@@ -95,51 +101,46 @@ namespace RefreshWeChatCountService.AppDatas
             }
 
         }
+
         private void GetWeChatDataAsync(IMongoCollection<MerchantAppModel> mamCollection, MerchantAppModel mam, IMongoCollection<WeChatCountModel> wccmCollection)
         {
-            string token = null;
-            Dictionary<WeChatCountType, string> data = null;
             try
             {
-                //using (WebClient wc = new WebClient())
-                //{
-                //wc.Encoding = Encoding.UTF8;
-                WebClient wc = null;
+
+                string token = null;
                 using (var allCountData = new AllCountData())
                 {
                     token = allCountData.GetToken(mam.AppID, mam.AppSecret);
-                    //token = allCountData.GetWeChatAccessToken(wc, mam.AppID, mam.AppSecret);
                 }
                 if (string.IsNullOrEmpty(token))
                 {
                     return;
                 }
-                data = GetWeChatRequestData();
+                var data = GetWeChatRequestData();
                 foreach (var item in data)
                 {
                     string jsonData = "";
                     int num = (int)item.Key;
                     if (num == 5 || num == 51 || num == 50)
                     {
-                        jsonData = GetWeChatCountPortrait(wc, item.Value, token, num);
+                        jsonData = GetWeChatCountPortrait(item.Value, token, num);
                     }
                     else if (num < 10)
                     {
-                        jsonData = GetWeChatCountYesterDay(wc, item.Value, token);
+                        jsonData = GetWeChatCountYesterDay(item.Value, token);
 
                     }
                     else if (num % 10 != 0)
                     {
-                        jsonData = GetWeChatCountLastWeak(wc, item.Value, token, num % 10);
+                        jsonData = GetWeChatCountLastWeak(item.Value, token, num % 10);
                     }
                     else
                     {
-                        jsonData = GetWeChatCountLastMonth(wc, item.Value, token);
+                        jsonData = GetWeChatCountLastMonth(item.Value, token);
                     }
                     if (!string.IsNullOrEmpty(jsonData))
                     {
                         SaveCountData(wccmCollection, jsonData, mam, item);
-                        jsonData = null;
                     }
                 }
                 //}
@@ -148,8 +149,6 @@ namespace RefreshWeChatCountService.AppDatas
             {
                 e.Save();
             }
-            token = null;
-            data = null;
             GC.Collect();
             GC.WaitForPendingFinalizers();
         }
@@ -159,6 +158,7 @@ namespace RefreshWeChatCountService.AppDatas
             string res = null;
             try
             {
+                GC.Collect();
                 HttpWebRequest webRequest = (HttpWebRequest)WebRequest.Create(new Uri(url));
                 webRequest.Method = "post";
                 webRequest.Accept = "application/json";
@@ -173,6 +173,7 @@ namespace RefreshWeChatCountService.AppDatas
                 {
                     res = new System.IO.StreamReader(response.GetResponseStream(), Encoding.UTF8).ReadToEnd();
                 }
+
                 return res;
             }
             catch (Exception)
@@ -234,16 +235,19 @@ namespace RefreshWeChatCountService.AppDatas
             return wcd;
         }
 
-
-        private void CreateRefreshCountSumDataTasks()
+        private void CreateRefreshCountSumDataTasks(TimerConfigModel cfg)
         {
+
 
             var wccmCollection = MongoDBContext.WeChatCountModelContext.GetCollection();
             var mmCollection = MongoDBContext.MerchantModelContext.GetCollection();
             var cmCollection = MongoDBContext.WeChatCountAppModelContext.GetCollection();
             var cmList = cmCollection.Find(Builders<WeChatCountAppModel>.Filter.Empty).ToList();
-            if (cmList != null && cmList.Count > 30)
-                cmCollection.DeleteMany(Builders<WeChatCountAppModel>.Filter.Lte(x => x.LastChangeTime, cmList[29].LastChangeTime));
+            if (cmList != null && cmList.Count > 29)
+                for (int i = 0; i < cmList.Count - 29; i++)
+                {
+                    cmCollection.DeleteOne(x => x.ID.Equals(cmList[i].ID));
+                }
             var list = (wccmCollection.Find(Builders<WeChatCountModel>.Filter.Empty)).ToList();
             var countModel = new WeChatCountAppModel();
 
@@ -295,6 +299,9 @@ namespace RefreshWeChatCountService.AppDatas
                     continue;
                 }
             }
+            cfg.WeChatCountRefreshDate.LastRefreshEndTime = DateTime.Now;
+            cfg.WeChatCountRefreshDate.RefreshUseSeconds = (long)(cfg.WeChatCountRefreshDate.LastRefreshEndTime - cfg.WeChatCountRefreshDate.LastRefreshStartTime).TotalSeconds;
+            TimerConfigModelContext.SaveConfigLog(cfg);
             cmCollection.InsertOne(countModel);
             wccmCollection = null;
             mmCollection = null;
@@ -331,7 +338,7 @@ namespace RefreshWeChatCountService.AppDatas
         /// <param name="accessToken"></param>
         /// <param name="num"></param>
         /// <returns></returns>
-        private string GetWeChatCountPortrait(WebClient wc, string url, string accessToken, int num)
+        private string GetWeChatCountPortrait(string url, string accessToken, int num)
         {
             string startDate = "", endData = "";
             switch (num)
@@ -351,7 +358,7 @@ namespace RefreshWeChatCountService.AppDatas
                 default:
                     break;
             }
-            return GetData(wc, accessToken, url, startDate, endData);
+            return TryGetWCData(accessToken, url, startDate, endData);
         }
         /// <summary>
         /// 获取今日统计
@@ -359,58 +366,54 @@ namespace RefreshWeChatCountService.AppDatas
         /// <param name="url"></param>
         /// <param name="accessToken"></param>
         /// <returns></returns>
-        private string GetWeChatCountYesterDay(WebClient wc, string url, string accessToken)
+        private string GetWeChatCountYesterDay(string url, string accessToken)
+        {
+            var date = DateTime.Now.AddDays(-1).ToString("yyyyMMdd");
+            return TryGetWCData(accessToken, url, date, date);
+        }
+        private string TryGetWCData(string accessToken, string url, string startDate, string endDate)
         {
 
-            var date = DateTime.Now.AddDays(-1).ToString("yyyyMMdd");
-            return GetData(wc, accessToken, url, date, date);
+            var json = GetData(accessToken, url, startDate, endDate);
+            if (json.IndexOf("ref_date") == -1)
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    Thread.Sleep(10);
+                    json = GetData(accessToken, url, startDate, endDate);
+                    if (json.IndexOf("ref_date") != -1)
+                    {
+                        break;
+                    }
+                }
 
+            }
+            return json;
         }
-        //private string GetData(WebClient wc, string accessToken, string url, string startDate, string endDate)
-        //{
-        //    try
-        //    {
-        //        var reObj = new
-        //        {
-        //            begin_date = startDate,
-        //            end_date = endDate
-        //        };
-        //        var json = "";
-        //        var da = wc.UploadData(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
-        //        //var response = wc.UploadStringTaskAsync(url + accessToken, JsonConvert.SerializeObject(reObj));
 
-        //        json = Encoding.UTF8.GetString(da);
-        //        return json;
-        //    }
-        //    catch (Exception)
-        //    {
-        //        return null;
-        //    }
-
-        //}
-        private string GetData(WebClient wc, string accessToken, string url, string startDate, string endDate)
+        private string GetData(string accessToken, string url, string startDate, string endDate)
         {
             var reObj = new
             {
                 begin_date = startDate,
                 end_date = endDate
             };
-            return GetResponseString(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
-            //try
-            //{
+            var result =
 
-            //    var json = "";
-            //    var da = wc.UploadData(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
-            //    //var response = wc.UploadStringTaskAsync(url + accessToken, JsonConvert.SerializeObject(reObj));
-
-            //    json = Encoding.UTF8.GetString(da);
-            //    return json;
-            //}
-            //catch (Exception)
-            //{
-            //    return null;
-            //}
-
+             GetResponseString(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
+            for (int i = 0; i < 5; i++)
+            {
+                if (result == null)
+                {
+                    Thread.Sleep(10);
+                    result = GetResponseString(url + accessToken, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(reObj)));
+                    if (result != null)
+                    {
+                        break;
+                    }
+                }
+            }
+            return result;
         }
         /// <summary>
         /// 获取周统计
@@ -419,7 +422,7 @@ namespace RefreshWeChatCountService.AppDatas
         /// <param name="accessToken"></param>
         /// <param name="weekNum">周的个数最大值4 （1 2 3 4）</param>
         /// <returns></returns>
-        private string GetWeChatCountLastWeak(WebClient wc, string url, string accessToken, int weekNum)
+        private string GetWeChatCountLastWeak(string url, string accessToken, int weekNum)
         {
             var currentDateTime = DateTime.Now;
             var currentDayOfWeek = Convert.ToInt32(currentDateTime.DayOfWeek.ToString("d"));
@@ -430,7 +433,7 @@ namespace RefreshWeChatCountService.AppDatas
 
             var dateStart = lastStartWeek.ToString("yyyyMMdd");
             var dateEnd = lastEndWeek.ToString("yyyyMMdd");
-            return GetData(wc, accessToken, url, dateStart, dateEnd);
+            return TryGetWCData(accessToken, url, dateStart, dateEnd);
         }
         /// <summary>
         /// 获取上月统计
@@ -438,7 +441,7 @@ namespace RefreshWeChatCountService.AppDatas
         /// <param name="url"></param>
         /// <param name="accessToken"></param>
         /// <returns></returns>
-        private string GetWeChatCountLastMonth(WebClient wc, string url, string accessToken)
+        private string GetWeChatCountLastMonth(string url, string accessToken)
         {
             var currentDateTime = DateTime.Now;
 
@@ -450,7 +453,7 @@ namespace RefreshWeChatCountService.AppDatas
 
             var dateStart = lastStartMonth.ToString("yyyyMMdd");
             var dateEnd = lastEndMonth.ToString("yyyyMMdd");
-            return GetData(wc, accessToken, url, dateStart, dateEnd);
+            return TryGetWCData(accessToken, url, dateStart, dateEnd);
         }
 
 

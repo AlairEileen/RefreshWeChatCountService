@@ -40,7 +40,7 @@ namespace RefreshWeChatCountService.Contexts
 
         public static void SaveConfigLog(TimerConfigModel timerConfigModel)
         {
-            ConfigModel.GetCollection().UpdateOne(x => x.ID.Equals(timerConfigModel.ID), ConfigModel.Update.Set(x => x.LastExecuteTime, DateTime.Now));
+            ConfigModel.GetCollection().UpdateOne(x => x.ID.Equals(timerConfigModel.ID), ConfigModel.Update.Set(x => x.LastExecuteTime, DateTime.Now).Set(x => x.MerchantRefreshDate, timerConfigModel.MerchantRefreshDate).Set(x => x.MiniAppRefreshDate, timerConfigModel.MiniAppRefreshDate).Set(x => x.WeChatCountRefreshDate, timerConfigModel.WeChatCountRefreshDate));
         }
     }
 }
